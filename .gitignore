@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+data/graphs/
+results/*.csv
+results/*.png
+*.gpickle
+.DS_Store

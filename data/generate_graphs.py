@@ -1,98 +1,87 @@
 """
-generate_graphs.py
+generate_graphs.py -- benchmark sets for the revised study (plan S0.2, A2, D2, D6).
 
-Generates the 140-instance synthetic benchmark suite described in the
-paper (Table: Synthetic Graph Dataset Generation Parameters and
-Instance Counts), spanning three graph families and three scales.
+Backward compatible with the submitted version:
 
-    ER (Erdos-Renyi):        uniform random connectivity
-    BA (Barabasi-Albert):    preferential attachment, scale-free hubs
-    WS (Watts-Strogatz):     small-world, high local clustering
+    python data/generate_graphs.py --out-dir data/graphs --seed 42
 
-Usage
------
-    python generate_graphs.py --out-dir data/graphs --seed 42
+still produces the original 140-instance suite (Table 4) byte-for-byte,
+now relabelled VAL, plus a manifest with per-instance seeds and SHA-256.
 
-Produces one .gpickle (networkx graph) or .edgelist file per instance,
-named <family>_<scale>_<index>.edgelist, plus a manifest CSV listing
-every instance and its generation parameters.
+New sets (see src/gcpbench/datasets.py for the design):
+
+    python data/generate_graphs.py --set VAL     --out-dir data/VAL
+    python data/generate_graphs.py --set TEST-A  --out-dir data/TEST-A
+    python data/generate_graphs.py --set TEST-B  --out-dir data/TEST-B
+    python data/generate_graphs.py --set PLANTED --out-dir data/PLANTED
+
+    # register the paper's ORIGINAL instance files as VAL (preferred if available)
+    python data/generate_graphs.py --register-dir path/to/original_graphs --set VAL
+
+    # lock / verify hashes (run `lock` once, commit registry/datasets.lock.json,
+    # tag the commit, and only then evaluate any heuristic on TEST-A/TEST-B/EXT)
+    python data/generate_graphs.py --lock
+    python data/generate_graphs.py --verify
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
 import os
-import random
+import sys
 
-import networkx as nx
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-# Exactly matches the paper's dataset table.
-DATASET_SPEC = [
-    # (family, scale, n_range, param_fn, count)
-    ("ER", "small",  (30, 120),   lambda rng: {"p": rng.choice([0.10, 0.20])}, 20),
-    ("ER", "medium", (500, 1000), lambda rng: {"p": 0.05},                    20),
-    ("ER", "large",  (2000, 5000), lambda rng: {"p": rng.choice([0.01, 0.02])}, 10),
+from gcpbench import datasets  # noqa: E402
 
-    ("BA", "small",  (30, 120),   lambda rng: {"m": rng.choice([2, 4])}, 20),
-    ("BA", "medium", (500, 1000), lambda rng: {"m": 4},                 20),
-    ("BA", "large",  (2000, 5000), lambda rng: {"m": 4},                10),
-
-    ("WS", "small",  (120, 120),   lambda rng: {"k": 8,  "p": 0.1}, 10),
-    ("WS", "medium", (500, 1000),  lambda rng: {"k": 20, "p": 0.1}, 20),
-    ("WS", "large",  (2000, 5000), lambda rng: {"k": 20, "p": 0.1}, 10),
-]
-
-
-def make_graph(family: str, n: int, params: dict, rng: random.Random) -> nx.Graph:
-    if family == "ER":
-        return nx.erdos_renyi_graph(n, params["p"], seed=rng.randint(0, 2**31))
-    if family == "BA":
-        m = min(params["m"], n - 1)  # m must be < n
-        return nx.barabasi_albert_graph(n, m, seed=rng.randint(0, 2**31))
-    if family == "WS":
-        k = min(params["k"], n - 1 if (n - 1) % 2 == 0 else n - 2)
-        return nx.watts_strogatz_graph(n, k, params["p"], seed=rng.randint(0, 2**31))
-    raise ValueError(f"unknown family: {family}")
+DEFAULT_DIRS = {"VAL": "data/VAL", "TEST-A": "data/TEST-A", "TEST-B": "data/TEST-B",
+                "PLANTED": "data/PLANTED", "DIMACS": "data/dimacs"}
+LOCK = "registry/datasets.lock.json"
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out-dir", default="data/graphs")
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--set", default="VAL", choices=["VAL", "TEST-A", "TEST-B", "PLANTED", "DIMACS"])
+    ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--seed", type=int, default=None, help="master seed (default: per-set constant)")
+    ap.add_argument("--register-dir", default=None, help="register existing files as --set")
+    ap.add_argument("--all", action="store_true", help="generate VAL, TEST-A, TEST-B, PLANTED")
+    ap.add_argument("--lock", action="store_true")
+    ap.add_argument("--verify", action="store_true")
+    args = ap.parse_args()
 
-    os.makedirs(args.out_dir, exist_ok=True)
-    rng = random.Random(args.seed)
-    manifest_rows = []
+    if args.lock or args.verify:
+        dirs = {k: v for k, v in DEFAULT_DIRS.items() if os.path.exists(os.path.join(v, "manifest.csv"))}
+        if args.lock:
+            out = datasets.lock(dirs, LOCK)
+            for k, v in out["sets"].items():
+                print(f"locked {k}: {v['n_instances']} instances, sha256 {v['set_sha256'][:16]}")
+            print(f"wrote {LOCK}; commit it and tag the commit before any TEST evaluation.")
+        else:
+            problems = datasets.verify(dirs, LOCK)
+            print("\n".join(problems) if problems else f"all sets match {LOCK}")
+            sys.exit(1 if problems else 0)
+        return
 
-    for family, scale, (n_lo, n_hi), param_fn, count in DATASET_SPEC:
-        for idx in range(count):
-            n = rng.randint(n_lo, n_hi) if n_lo != n_hi else n_lo
-            params = param_fn(rng)
-            g = make_graph(family, n, params, rng)
-
-            fname = f"{family}_{scale}_{idx:03d}.edgelist"
-            path = os.path.join(args.out_dir, fname)
-            nx.write_edgelist(g, path, data=False)
-
-            manifest_rows.append({
-                "instance_id": fname,
-                "family": family,
-                "scale": scale,
-                "n_vertices": g.number_of_nodes(),
-                "n_edges": g.number_of_edges(),
-                "params": params,
-            })
-
-    manifest_path = os.path.join(args.out_dir, "manifest.csv")
-    with open(manifest_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=manifest_rows[0].keys())
-        writer.writeheader()
-        writer.writerows(manifest_rows)
-
-    print(f"Generated {len(manifest_rows)} instances into {args.out_dir}")
-    print(f"Manifest: {manifest_path}")
+    sets = ["VAL", "TEST-A", "TEST-B", "PLANTED"] if args.all else [args.set]
+    for s in sets:
+        out_dir = (args.out_dir if (args.out_dir and not args.all) else DEFAULT_DIRS[s])
+        if args.register_dir:
+            rows = datasets.register_dir(s, args.register_dir)
+            print(f"registered {len(rows)} files in {args.register_dir} as {s}")
+            continue
+        if s == "DIMACS":
+            rows = datasets.register_dimacs(out_dir)
+            print(f"registered {len(rows)} DIMACS instances in {out_dir}")
+            continue
+        legacy = s in ("VAL", "TEST-A")       # same file format/pipeline as the paper
+        rows = datasets.generate(s, out_dir, master_seed=args.seed, legacy_edgelist=legacy)
+        print(f"{s}: generated {len(rows)} instances into {out_dir}")
+    if "TEST-A" in sets and os.path.exists(os.path.join(DEFAULT_DIRS["VAL"], "manifest.csv")):
+        overlap = datasets.check_disjoint(DEFAULT_DIRS["VAL"], DEFAULT_DIRS["TEST-A"])
+        print(f"VAL/TEST-A shared instances (by hash): {overlap}")
+        if overlap:
+            sys.exit("TEST-A is not disjoint from VAL")
 
 
 if __name__ == "__main__":

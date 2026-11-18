@@ -43,6 +43,8 @@ def main():
     ap.add_argument("--naive-reps", type=int, default=3)
     ap.add_argument("--naive-max-m", type=int, default=60000,
                     help="skip the O(n(n+m)) naive code above this many edges")
+    ap.add_argument("--nx-max-m", type=int, default=30000,
+                    help="skip networkx's DSATUR (quadratic; 187 s on a 233k-edge graph) above this many edges")
     a = ap.parse_args()
     env = pin(0)
     F = paper_formulas()
@@ -74,8 +76,10 @@ def main():
         if g.m <= a.naive_max_m:
             out.append({**base, "method": "RLF_legacy", "impl": "naive",
                         **time_fn(lambda: L.rlf_coloring(G), reps=a.naive_reps, warmup=1)})
-        out.append({**base, "method": "DSATUR", "impl": "networkx",
-                    **time_fn(lambda: nx.greedy_color(G, strategy="saturation_largest_first"), reps=a.reps)})
+        if g.m <= a.nx_max_m:
+            out.append({**base, "method": "DSATUR", "impl": "networkx",
+                        **time_fn(lambda: nx.greedy_color(G, strategy="saturation_largest_first"),
+                                  reps=a.naive_reps, warmup=1)})
         print(r["instance_id"], "timed", flush=True)
     T = pd.DataFrame(out)
     common.save(T, "e_e_runtime_long.csv")
@@ -99,7 +103,7 @@ def main():
             fits.append({"impl": impl, "method": method, "slope_log_time_vs_log_m": k, "n_points": len(d)})
     common.save(pd.DataFrame(fits), "e_e_scaling_fits.csv")
     common.write_json({**platform_info(), **env, "reps": a.reps, "naive_reps": a.naive_reps,
-                       "naive_max_m": a.naive_max_m, "set": a.set, "per_cell": a.per_cell}, "e_e_platform.json")
+                       "naive_max_m": a.naive_max_m, "nx_max_m": a.nx_max_m, "set": a.set, "per_cell": a.per_cell}, "e_e_platform.json")
     print(summ[summ.method.isin(["DSATUR", "LLaMA_H3", "DeepSeek_H1"])].round(3).to_string(index=False))
     pareto()
 

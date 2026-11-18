@@ -66,6 +66,8 @@ def exact_chi(g: Graph, time_limit: float = 60.0, workers: int = 1):
     for i, v in enumerate(clique):          # symmetry breaking with the clique
         m.Add(x[v][i] == 1)
     m.Add(sum(y) >= lb)
+    for v in range(g.n):                    # warm start from the DSATUR colouring
+        m.AddHint(x[v][ub_col[v]], 1)
     m.Minimize(sum(y))
     s = cp_model.CpSolver()
     s.parameters.max_time_in_seconds = time_limit
@@ -76,7 +78,8 @@ def exact_chi(g: Graph, time_limit: float = 60.0, workers: int = 1):
         k = int(round(s.ObjectiveValue()))
         return k, k, "OPTIMAL", cols
     if st == cp_model.FEASIBLE:
-        return max(lb, int(np.ceil(s.BestObjectiveBound()))), int(round(s.ObjectiveValue())), "FEASIBLE", None
+        return (max(lb, int(np.ceil(s.BestObjectiveBound() - 1e-9))),
+                min(ub, int(round(s.ObjectiveValue()))), "FEASIBLE", None)
     return lb, ub, "UNKNOWN", ub_col
 
 

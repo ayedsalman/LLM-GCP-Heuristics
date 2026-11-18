@@ -16,3 +16,7 @@ results/*.png
 results/scratch/
 # LLM raw outputs may be large; registry/candidates.jsonl is committed
 runs/
+# large, regenerable per-instance detail
+results/revision/e_f_identity_long.csv
+results/revision/gaps_long.csv
+results/cache/

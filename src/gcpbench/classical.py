@@ -85,33 +85,40 @@ def ido(g: Graph):
 
 
 def dsatur_sewell(g: Graph):
-    """DSATUR with Sewell's (1996) tie-break. O(n * |ties| * deg * k); a
-    reference implementation, not tuned for speed."""
+    """DSATUR with Sewell's (1996) tie-break among maximum-saturation vertices:
+    maximise sum over uncoloured neighbours u of |A(v) & A(u)|, where A(x) is the
+    set of colours already in use that x could still take; then lowest id."""
     n, adj = g.n, g.adj
     color = [-1] * n
     nbr = [set() for _ in range(n)]
+    sat = np.zeros(n, dtype=np.int64)
+    unc = np.ones(n, dtype=bool)
     k_used = 0
-    unc = set(range(n))
-    while unc:
-        smax = max(len(nbr[v]) for v in unc)
-        ties = [v for v in unc if len(nbr[v]) == smax]
-        if len(ties) > 1:
-            def tb(v):
-                av = {c for c in range(k_used) if c not in nbr[v]}
+    for _ in range(n):
+        smax = sat[unc].max()
+        ties = np.flatnonzero(unc & (sat == smax))
+        if len(ties) > 1 and k_used > 0:
+            best, v = None, -1
+            for x in ties:                       # ascending ids
+                av = [c for c in range(k_used) if c not in nbr[x]]
                 tot = 0
-                for u in adj[v]:
+                for u in adj[x]:
                     if color[u] == -1:
-                        tot += sum(1 for c in av if c not in nbr[u])
-                return (tot, -v)
-            v = max(ties, key=tb)
+                        nu = nbr[u]
+                        tot += sum(1 for c in av if c not in nu)
+                if best is None or tot > best:
+                    best, v = tot, int(x)
         else:
-            v = ties[0]
+            v = int(ties[0])
         c = _smallest_free(nbr[v])
         color[v] = c
         k_used = max(k_used, c + 1)
-        unc.remove(v)
+        unc[v] = False
         for u in adj[v]:
-            nbr[u].add(c)
+            if c not in nbr[u]:
+                nbr[u].add(c)
+                if color[u] == -1:
+                    sat[u] += 1
     return color
 
 

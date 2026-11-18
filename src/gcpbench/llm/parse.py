@@ -47,6 +47,8 @@ def _formula_from_line(line: str) -> str | None:
     s = _strip_md(line)
     if re.search(r"\btie", s, re.IGNORECASE):
         return None
+    if _HEADING_RE.match(line) and "=" not in s:      # "Heuristic 1: Saturation-led"
+        return None
     if not _FEATURE_RE.search(s):
         return None
     # take the right-hand side of the last '=' (score(v) = ...), or after ':'
@@ -60,6 +62,12 @@ def _formula_from_line(line: str) -> str | None:
     if not _FEATURE_RE.search(rhs):
         return None
     if not re.search(r"[\d+\-*·×]", rhs):
+        return None
+    # most identifiers must be features or known functions (rejects prose like "sat-led")
+    idents = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", rhs)
+    known = sum(1 for t in idents if t.lower() in ALIASES or t.lower() in
+                {"v", "rand", "random", "max", "min", "log", "sqrt", "exp", "abs", "e"})
+    if idents and known / len(idents) < 0.6:
         return None
     # drop trailing prose after the expression, e.g. "... + 0.1*ucn (higher is better)"
     rhs = re.split(r"\s{2,}|\s+[—–]\s+|\s+-\s+(?=[A-Za-z]{4,})", rhs)[0]

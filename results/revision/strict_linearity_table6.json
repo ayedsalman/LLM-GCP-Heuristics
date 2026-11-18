@@ -1,0 +1,15 @@
+{
+ "DSATUR": true,
+ "DeepSeek_H1": false,
+ "DeepSeek_H1A": true,
+ "DeepSeek_H1B": false,
+ "GPT4o_H4": true,
+ "GPT4o_H4A": true,
+ "GPT51_H1": true,
+ "GPT51_H1B": true,
+ "Claude_H3": true,
+ "Claude_H3A": true,
+ "Claude_H3A2A": true,
+ "LLaMA_H3": true,
+ "LLaMA_H3A": true
+}

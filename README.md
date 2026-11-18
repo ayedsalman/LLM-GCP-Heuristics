@@ -1,31 +1,42 @@
 # LLM-GCP-Heuristics
 
-Code, benchmark instances, and generated heuristic formulas for
-**"Sequential and GPU Parallel Heuristics for the Graph Coloring
-Problem"** (AlMubaraki & Ahmad, 2026).
+Code, benchmark sets and generated heuristic formulas for **"LLM-Aided
+Heuristics for the Graph Coloring Problem"** (AlMubaraki, Ahmad and Salman;
+submitted to *Computation*, MDPI).
 
-This repository implements the LLM-generated vertex-ordering heuristics
-described in the paper, the dual CPU/GPU benchmarking pipeline, and the
-statistical significance testing (Friedman test with Nemenyi post-hoc
-correction) used throughout Section 4.
+Version 2 is the **revision infrastructure** that answers the reviewers'
+comments (26 comments from three reviewers). It has disjoint validation and
+test sets, multi-seed generation, control baselines, strict validation of the
+formulas, exact optimality gaps, an equal-footing runtime comparison and a GPU
+kernel ablation. `docs/REVISION_MAP.md` maps every item of the revision plan
+to code and outputs. `results/revision/SUMMARY.md` gives the results that
+could be produced without LLM API calls or a GPU.
 
-## Repository structure
+## Layout
 
 ```
-.
-├── analysis/
-│   └── statistical_analysis.py   # Friedman + Nemenyi, CD diagrams (Section 3.9)
-├── data/
-│   └── generate_graphs.py        # 140-instance ER/BA/WS benchmark suite (Table 4)
-├── src/
-│   ├── heuristics/
-│   │   └── sequential_heuristics.py  # All formulas from the paper's formulas table
-│   ├── cuda/
-│   │   └── parallel_coloring.cu      # CUDA local-maxima parallel coloring kernel
-│   └── run_benchmark.py          # End-to-end sequential benchmark runner
-├── results/                      # Output CSVs / CD diagrams land here (gitignored)
-├── requirements.txt
-└── LICENSE
+PROTOCOL.md                  frozen protocol (selection rule, margins, seeds, hypotheses)
+registry/                    datasets.lock.json (SHA-256 of every instance), protocol_freeze.json,
+                             candidates.jsonl (every candidate formula + provenance), models.json
+data/generate_graphs.py      VAL / TEST-A / TEST-B / PLANTED sets; DIMACS registration; lock/verify
+src/heuristics/              ORIGINAL submitted implementation (unchanged; the reference)
+src/gcpbench/
+  validator.py               AST validator for the linear-combination constraint (C1)
+  formulas.py                Table-6 formulas, compiled with their exact operation order
+  greedy.py                  Algorithm 1: incremental greedy, O((n+m) log n), bit-identical to the original
+  classical.py               DSATUR variants, IDO, Welsh-Powell, smallest-last, First-Fit, RLF (fixed), RLF_legacy
+  fastlinear.py              numba engine for control/tuning searches
+  parallel.py                Algorithm 2: exact CPU emulator of the CUDA kernel, Jones-Plassmann, Luby
+  bounds.py                  exact chi (CP-SAT), clique lower bounds, TabuCol upper bounds
+  stats.py                   paired tests, bootstrap CIs, Holm, TOST, Friedman/Nemenyi, across-seed tests
+  datasets.py, evaluate.py, timing.py
+  llm/                       prompts (verbatim), clients, parser, registry, pipeline (E-B1, E-B3, E-H), CUDA audit (E-C)
+src/cuda/parallel_coloring.cu  revised GPU driver (one kernel, swappable priorities), see src/cuda/README.md
+experiments/                 e0_equivalence, e_a_main, e_b2_controls, e_d_bounds, e_e_runtime,
+                             e_f_ablation, e_g_characterise, run_llm (API experiments), make_summary
+analysis/statistical_analysis.py  original Friedman/Nemenyi CLI (now with computed q_alpha and --paired TOST)
+docs/                        ALGORITHMS.md (pseudocode, complexity), INTERVENTION_LOG.md, REVISION_MAP.md
+tests/                       pytest suite (includes a host build of the CUDA source checked against the emulator)
 ```
 
 ## Quick start
@@ -33,88 +44,63 @@ correction) used throughout Section 4.
 ```bash
 pip install -r requirements.txt
 
-# 1. Generate the 140-instance synthetic benchmark suite
-python data/generate_graphs.py --out-dir data/graphs --seed 42
+# 1. benchmark sets (VAL reproduces the submitted generator byte-for-byte)
+python data/generate_graphs.py --all
+python data/generate_graphs.py --verify          # hashes must match registry/datasets.lock.json
+python scripts/freeze_protocol.py --check        # PROTOCOL.md unchanged since the freeze
 
-# 2. Run all sequential heuristics on one scale
-cd src
-python run_benchmark.py --graphs-dir ../data/graphs --scale medium \
-    --out ../results/seq_medium.csv
-cd ..
+# 2. experiments that need neither API keys nor a GPU
+python experiments/e0_equivalence.py             # new evaluator == original code
+python experiments/e_a_main.py --workers 2       # VAL vs TEST-A, paired/TOST, Friedman table, baselines
+python experiments/e_b2_controls.py              # random / handcrafted / CMA-ES controls, perturbation
+python experiments/e_d_bounds.py                 # exact chi (small), bounds (medium/large), gaps
+python experiments/e_e_runtime.py                # equal-footing runtime, scaling, Pareto
+python experiments/e_f_ablation.py               # GPU priority ablation (emulator)
+python experiments/e_g_characterise.py           # effective weights, ordering similarity, relatedness
+python experiments/make_summary.py               # results/revision/SUMMARY.md
 
-# 3. Statistical significance testing (Friedman + Nemenyi)
-python analysis/statistical_analysis.py \
-    --input results/seq_medium.csv --alpha 0.05 --baseline DSATUR \
-    --cd-plot results/seq_medium_cd.png
+# 3. experiments that need API keys (see registry/models.json)
+python experiments/run_llm.py zero-shot --model LLaMA --seeds 0-19
+python experiments/run_llm.py refine    --model LLaMA --seeds 0-19 --arms T,G,R,N
+python experiments/run_llm.py cuda-audit --model Claude --samples 20    # needs nvcc + GPU
+
+# 4. GPU
+nvcc -O3 --fmad=false -std=c++17 src/cuda/parallel_coloring.cu -o parallel_coloring
+python scripts/verify_cuda.py --bin ./parallel_coloring
+
+pytest -q
 ```
 
-This reproduces the methodology of Section 4.1.4 / 4.2.3 of the paper.
-Note that `--seed` controls the random graph generation; exact color
-counts and rank values will differ slightly instance-by-instance from
-the paper's reported numbers (which were generated with the paper's
-own seed and, for the parallel results, executed on an NVIDIA T4 GPU),
-but the qualitative pattern (DSATUR/LLaMA/Claude/GPT-4o/DeepSeek
-clustering near the top, GPT-5.1/RLF/First-Fit forming a weaker tier)
-should reproduce, and the Nemenyi critical difference for a given
-(*k* algorithms, *N* instances) pair is deterministic and will match
-the paper's reported CD exactly regardless of the specific graphs
-generated.
+Every experiment writes CSVs to `results/revision/` (committed) and caches
+per-instance colour counts in `results/cache/` (not committed).
 
-## What's implemented vs. illustrative
+## Defects found in the submitted code (fixed in v2; originals kept for reproduction)
 
-- **`analysis/statistical_analysis.py`** — fully implemented and
-  tested. Verified to reproduce the paper's exact Nemenyi CD values
-  (e.g. CD=1.485 for k=8 algorithms, N=50 instances, matching the
-  paper's small-scale sequential test) since CD depends only on *k*
-  and *N*, not on the specific data.
-- **`data/generate_graphs.py`** — fully implemented and tested;
-  generates exactly 140 instances matching the paper's Table 4
-  parameters (ER/BA/WS × small/medium/large).
-- **`src/heuristics/sequential_heuristics.py`** — fully implemented
-  and tested; every formula is transcribed directly from the paper's
-  formulas table and verified to produce valid colorings.
-- **`src/run_benchmark.py`** — fully implemented and tested end-to-end
-  against the two files above.
-- **`src/cuda/parallel_coloring.cu`** — implements the local-maxima
-  parallel coloring methodology described in Section 3.6 (Score
-  Kernel → parallel reduction → simultaneous color assignment via
-  CSR representation, `cudaEvent_t` timing). The default kernel
-  computes the DSATUR-equivalent (saturation-only) score; comments in
-  the file show exactly where to substitute the LLM-generated
-  formulas (GPT-5.1, Claude, DeepSeek) from the paper's Table 4.7.
-  **This file could not be compiled or run in the environment used to
-  prepare this repository (no CUDA toolkit / GPU available)** — please
-  compile with `nvcc -O3 parallel_coloring.cu -o parallel_coloring` on
-  a CUDA-capable machine and verify before relying on it.
-
-## Statistical analysis usage
-
-`analysis/statistical_analysis.py` accepts either:
-
-- **Wide CSV**: one row per graph instance, one column per algorithm,
-  values = color count (or any other per-instance metric).
-- **Long CSV**: columns `instance_id, algorithm, value`.
-
-```python
-from analysis.statistical_analysis import run_friedman_nemenyi, load_results
-
-df = load_results("results/seq_medium.csv")
-report = run_friedman_nemenyi(df, alpha=0.05, baseline="DSATUR")
-print(report.summary())
-```
+1. **RLF.** `rlf_coloring` grows each colour class by
+   `len(N(v) & current_class)`. This key is always 0 for every candidate, so
+   the choice falls back to set-iteration order. It is kept as `RLF_legacy`;
+   `RLF` implements Leighton's rule.
+2. **CUDA kernel.** Stale `is_local_max` flags recoloured vertices in later
+   rounds, racing with adjacent vertices coloured in the same round. Colours
+   were capped at 64. `float` scores lost the degree term of `1e6*sat + deg`
+   once sat ≥ 17. The timed loop copied the full colour array every round.
+3. **Validation.** The linear-combination constraint was not enforced; the
+   headline DeepSeek H1 (`0.6 sat + 0.4 deg·cc`) is bilinear.
+4. **Runtime comparison.** The LLM formulas ran through an O(n(n+m)) rescoring
+   loop, while DSATUR is cheap in any priority-queue implementation.
 
 ## Citation
 
-If you use this code, please cite:
-
 ```bibtex
 @article{almubaraki2026llmgcp,
-  title   = {Sequential and GPU Parallel Heuristics for the Graph Coloring Problem},
-  author  = {AlMubaraki, Zenah Khaled and Ahmad, Imtiaz},
-  year    = {2026}
+  title   = {LLM-Aided Heuristics for the Graph Coloring Problem},
+  author  = {AlMubaraki, Zenah Khaled and Ahmad, Imtiaz and Salman, Ayed},
+  journal = {Computation},
+  year    = {2026},
+  note    = {under revision}
 }
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

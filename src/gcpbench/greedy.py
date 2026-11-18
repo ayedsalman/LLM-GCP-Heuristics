@@ -31,11 +31,13 @@ def _smallest_free(used: set) -> int:
 
 
 def greedy_scored(g: Graph, score, *, tuple_key: bool = False, dynamic: bool = True,
-                  return_order: bool = False):
+                  return_order: bool = False, probe=None, probe_every: int = 0):
     """Generic incremental greedy.
 
     score(sat, deg, ucn, cc, twohop) -> float, or a tuple if ``tuple_key``.
     ``dynamic=False`` skips rescoring (valid only if score ignores sat and ucn).
+    ``probe(color, sat, ucn)`` is called every ``probe_every`` colourings
+    (analysis hook for plan G1; it must not modify its arguments).
     Returns colors (list) and optionally the colouring order.
     """
     n, adj = g.n, g.adj
@@ -63,6 +65,8 @@ def greedy_scored(g: Graph, score, *, tuple_key: bool = False, dynamic: bool = T
                 continue
         elif -item[0] != key[v]:
             continue
+        if probe is not None and probe_every and len(order) % probe_every == 0:
+            probe(color, sat, ucn)
         c = _smallest_free(nbr_colors[v])
         color[v] = c
         order.append(v)

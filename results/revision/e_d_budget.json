@@ -1,0 +1,10 @@
+{
+ "sets": "VAL,TEST-A",
+ "scales": "small",
+ "cp_limit": 300.0,
+ "tabu_medium": 300,
+ "tabu_large": 900,
+ "runs": 5,
+ "workers": 1,
+ "out": "bounds.csv"
+}

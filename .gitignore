@@ -1,8 +1,22 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+.pytest_cache/
+.DS_Store
+*.gpickle
+# benchmark instance files are regenerated from seeds and checked against
+# registry/datasets.lock.json; manifests (provenance + hashes) are committed
 data/graphs/
+data/*/*.edgelist
+data/*/*.col
+data/*/*.col.b
+# scratch outputs; curated revision results live in results/revision/
 results/*.csv
 results/*.png
-*.gpickle
-.DS_Store
+results/scratch/
+# LLM raw outputs may be large; registry/candidates.jsonl is committed
+runs/
+# large, regenerable per-instance detail
+results/revision/e_f_identity_long.csv
+results/revision/gaps_long.csv
+results/cache/

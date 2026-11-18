@@ -4,3 +4,7 @@ pandas>=2.0
 scipy>=1.10
 scikit-posthocs>=0.9
 matplotlib>=3.7
+numba>=0.59        # fast engine for controls / tuning / TabuCol
+cma>=3.3           # CMA-ES tuned arm (B3)
+ortools>=9.8       # CP-SAT exact chromatic numbers (D3)
+pytest>=7

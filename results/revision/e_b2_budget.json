@@ -1,0 +1,14 @@
+{
+ "draws": 20,
+ "restarts": 6,
+ "evals_per_restart": 250,
+ "feature_scales": {
+  "sat": 4.225,
+  "deg": 24.8748127924493,
+  "ucn": 24.8748127924493,
+  "cc": 0.23972307436228926,
+  "twohop": 1084.5485510288802
+ },
+ "seconds": 2121.4198381900787,
+ "engine": "gcpbench.fastlinear (numba)"
+}

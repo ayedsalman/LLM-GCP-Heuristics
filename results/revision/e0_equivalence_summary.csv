@@ -1,0 +1,9 @@
+part,scale,pairs,identical_colorings,identical_counts
+A,medium,840,840,840
+A,small,700,700,700
+B,large,390,390,390
+B,medium,780,780,780
+B,small,650,650,650
+C,large,330,0,322
+C,medium,660,0,646
+C,small,550,0,549

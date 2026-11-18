@@ -35,6 +35,11 @@ Methodology (matches paper Section 3.9)
 
 All analyses in the paper use alpha = 0.05, scipy.stats for the
 Friedman test, and scikit-posthocs for the Nemenyi post-hoc test.
+
+Revision note: "within CD of the baseline" is NOT evidence of equivalence
+(failure to reject a null). For claims that a heuristic "matches" DSATUR use
+``--paired`` (TOST against a pre-registered margin), implemented in
+src/gcpbench/stats.py.
 """
 
 from __future__ import annotations
@@ -111,24 +116,18 @@ def critical_difference(k: int, n: int, alpha: float = 0.05) -> float:
     """
     Nemenyi critical difference: CD = q_alpha * sqrt(k(k+1) / (6N))
 
-    k     : number of algorithms compared
-    n     : number of instances (graphs) each algorithm was run on
-    alpha : significance level (0.05 or 0.10 supported directly;
-            other values fall back to the closest tabulated q_alpha
-            with a warning)
+    Revision (plan S0.4 / Appendix B): q_alpha is now computed from the
+    studentized range distribution (scipy.stats.studentized_range with
+    infinite df, divided by sqrt(2)), which is the source of Demsar's
+    (2006) table, so any k and alpha are supported and the source is
+    recorded. The tabulated values above are kept only as a cross-check
+    (they agree to 3 decimals for k = 2..20, alpha in {0.05, 0.10}).
     """
-    table = _Q_ALPHA_005 if alpha == 0.05 else _Q_ALPHA_010 if alpha == 0.10 else None
-    if table is None:
-        raise ValueError(
-            f"alpha={alpha} not tabulated; use 0.05 or 0.10, "
-            "or extend _Q_ALPHA_* tables with your own q_alpha value."
-        )
-    if k not in table:
-        raise ValueError(
-            f"k={k} algorithms not tabulated (supported: 2-20). "
-            "Extend the table for larger k."
-        )
-    q_alpha = table[k]
+    from scipy.stats import studentized_range
+    q_alpha = float(studentized_range.ppf(1 - alpha, k, np.inf) / np.sqrt(2))
+    table = _Q_ALPHA_005 if alpha == 0.05 else _Q_ALPHA_010 if alpha == 0.10 else {}
+    if k in table and abs(table[k] - q_alpha) > 2e-3:  # pragma: no cover
+        raise AssertionError(f"q_alpha mismatch for k={k}: table {table[k]} vs computed {q_alpha:.4f}")
     return q_alpha * np.sqrt(k * (k + 1) / (6.0 * n))
 
 
@@ -339,11 +338,27 @@ def main():
     parser.add_argument("--alpha", type=float, default=0.05)
     parser.add_argument("--baseline", default=None, help="e.g. DSATUR or Jones-Plassmann")
     parser.add_argument("--cd-plot", default=None, help="optional path to save a CD diagram PNG")
+    parser.add_argument("--paired", action="store_true",
+                        help="also report the revision's primary analysis: paired differences vs "
+                             "--baseline with bootstrap CI, Wilcoxon+Holm and TOST (plan Sec. 2.3)")
+    parser.add_argument("--delta", type=float, default=0.10, help="TOST equivalence margin (colours)")
     args = parser.parse_args()
 
     df = load_results(args.input)
     report = run_friedman_nemenyi(df, alpha=args.alpha, baseline=args.baseline)
     print(report.summary())
+
+    if args.paired:
+        if not args.baseline:
+            raise SystemExit("--paired requires --baseline")
+        import os, sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+        from gcpbench.stats import paired_vs_baseline
+        pd.set_option("display.width", 200)
+        tab = paired_vs_baseline(df, args.baseline, delta=args.delta)
+        print("\nPaired comparison vs", args.baseline)
+        print(tab[["algorithm", "N", "mean_diff", "ci95_lo", "ci95_hi", "share_equal",
+                   "p_holm", "p_tost", "verdict"]].to_string(index=False, float_format="%.4f"))
 
     if args.cd_plot:
         plot_cd_diagram(report, args.cd_plot)
